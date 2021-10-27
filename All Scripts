@@ -1,0 +1,1072 @@
+-- Main Client Script
+
+local uis = game:GetService("UserInputService")
+local rs = game:GetService("ReplicatedStorage")
+local fighterDatabase = require(game.ReplicatedStorage.FighterDatabase)
+local FighterManager = require(game.ReplicatedStorage.FighterManager)
+local effects = require(rs.Effects)
+
+local player = game.Players.LocalPlayer
+local slotFrame = script.Parent.SlotFrame
+local hud = script.Parent.Parent.Parent:WaitForChild("HUD")
+local map = game.Workspace.Map
+local mouse = player:GetMouse()
+local cash = player:WaitForChild("Cash")
+
+local troopHover = player.PlayerGui:WaitForChild("TroopHover")
+local enemyHover = player.PlayerGui:WaitForChild("EnemyHover")
+local troopClick = player.PlayerGui:WaitForChild("TroopClick")
+
+local spawnedTemps = game.Workspace.SpawnedTemps
+local spawnedFighters = game.Workspace.SpawnedFighters
+local spawnedEnemies = game.Workspace.SpawnedEnemies
+
+local connection
+
+local oldTroop
+local slotFighter
+local lastClickedKey
+local temp
+
+local hitPart
+
+-- Useless to look nice functions
+
+function selected(image)
+	image.ScaleType = Enum.ScaleType.Crop
+	--button.Parent.Image.ImageColor3 = Color3.fromRGB(255,255,255)
+end
+
+function unselected(button)
+	for i,v in pairs(slotFrame:GetChildren()) do
+		if v:IsA("Frame") then
+			v.Image.ScaleType = Enum.ScaleType.Fit
+		end
+	end
+	--[[
+	for i,v in pairs(slotFrame:GetDescendants()) do
+		if v:IsA("ImageLabel") and v.Name == "Image" then
+			v.ImageColor3 = Color3.fromRGB(0,0,0)
+		end
+	end
+	--]]
+end
+
+-- Functions
+
+function placeTemp()
+	local ray = Ray.new(mouse.UnitRay.Origin, (mouse.Hit.p - mouse.UnitRay.Origin).unit * 5000)
+	hitPart = workspace:FindPartOnRayWithWhitelist(ray,map.Tiles:GetChildren())
+	--print(hitPart)
+	if hitPart then
+		if hitPart:FindFirstChild("Taken") and hitPart.Taken.Value == false then
+			temp.Parent = spawnedTemps
+			local Height = (0.5 * temp.HumanoidRootPart.Size.Y) + temp.Humanoid.HipHeight
+			temp.HumanoidRootPart.CFrame = (hitPart.CFrame * CFrame.Angles(0,math.rad(-90),0)) + Vector3.new(0,Height + 1.75,0) 
+			temp.HumanoidRootPart.Anchored = true
+		end
+	end
+end
+
+function clearOldTemp()
+	unselected()
+	if connection then
+		connection:Disconnect()
+	end
+	for i, v in pairs(spawnedTemps:GetChildren()) do
+		if v.Name == player.Name then
+			v.Parent = nil
+		end
+	end
+end
+
+-- Main
+
+local troop = nil
+
+mouse.Move:Connect(function()
+	local tab = game.Workspace.Map.Tiles:GetChildren()
+	for _,v in pairs(spawnedFighters:GetChildren()) do
+		table.insert(tab,v)
+	end
+	for _,v in pairs(spawnedEnemies:GetChildren()) do
+		table.insert(tab,v)
+	end
+	local ray = Ray.new(mouse.UnitRay.Origin, (mouse.Hit.p - mouse.UnitRay.Origin).unit * 5000)
+	local hit = workspace:FindPartOnRayWithWhitelist(ray,tab)
+	if hit then
+		if hit.Parent.Parent == spawnedFighters or hit.Parent.Parent.Parent == spawnedFighters then
+			if hit.Parent:IsA("Accessory") then
+				troop = hit.Parent.Parent
+			else
+				troop = hit.Parent
+			end
+			if troop and troop:FindFirstChild("Humanoid") and troop ~= "" then
+				--print(troop:GetFullName())
+				local fighter = rs.GetData:InvokeServer(troop.Name)
+				--print(fighter)
+				troopHover.Enabled = true
+				troopHover.Adornee = troop.Head
+				--print(fighter)
+				--print(fighter.Damage)
+				troopHover.Frame.TroopName.Text = fighter.DisplayName
+				troopHover.Frame.Owner.Text = "Owner: "..fighter.Owner
+				troopHover.Frame.Level.Text = "Level: "..tostring(fighter.Level)
+				troopHover.Frame.Frame.Health.Text = "Health: "..tostring(fighter.Health)
+				if fighter.Type == "Farm" then
+					troopHover.Frame.Frame.Damage.Text = tostring(fighter.Damage).." cash per wave" -- tostring(fighterDatabase[troop.Name].Damage).." cash every "..tostring(fighterDatabase[troop.Name].AttackSpeed).." seconds"
+					troopHover.Frame.Frame.Range.Text = "Range: --"
+					troopHover.Frame.Frame.AttackSpeed.Text = "Attack Speed: --"
+				else
+					troopHover.Frame.Frame.Damage.Text = "Damage: "..tostring(fighter.Damage)
+					troopHover.Frame.Frame.Range.Text = "Range: "..tostring(fighter.Range / 6).." tiles"
+					troopHover.Frame.Frame.AttackSpeed.Text = "Attack Speed: "..tostring(fighter.AttackSpeed)
+				end
+			end
+		elseif hit.Parent.Parent == spawnedEnemies or hit.Parent.Parent.Parent == spawnedEnemies then
+			local enemy
+			if hit.Parent:IsA("Accessory") then
+				enemy = hit.Parent.Parent
+			else
+				enemy = hit.Parent
+			end
+			--troopClick.Enabled = false
+			enemyHover.Enabled = true
+			enemyHover.Adornee = enemy.Head
+			enemyHover.Frame.EnemyName.Text = enemy.Name
+			enemyHover.Frame.Health.Frame.Health.Text = "Health: "..tostring(enemy.Humanoid.Health).." / "..tostring(enemy.Humanoid.MaxHealth)
+		else
+			troop = ""
+			troopHover.Enabled = false
+			troopHover.Adornee = nil
+			enemyHover.Enabled = false
+			enemyHover.Adornee = nil
+		end
+	else
+		--troopClick.Enabled = false
+		troopHover.Enabled = false
+		troopHover.Adornee = nil
+		enemyHover.Enabled = false
+		enemyHover.Adornee = nil
+	end
+end)
+
+uis.InputBegan:Connect(function(input, isTyping)
+	if isTyping then return end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if hitPart and hitPart:FindFirstChild("Taken") and lastClickedKey ~= nil then -- if clicked tile
+			--print(lastClickedKey)
+			unselected()
+			rs.PlaceFighter:FireServer(tostring(lastClickedKey), hitPart)
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		elseif troop ~= "" then -- if clicked troop
+			local fighter = rs.GetData:InvokeServer(troop.Name)
+			if troop and oldTroop == fighter.CodeName then -- if reclick current troop
+				troopClick.Enabled = false
+				oldTroop = ""
+				--print("alr clicked that troop")
+			else
+				--print("new troop")
+				if troopClick.Enabled then
+					troopClick.Enabled = false
+					wait(.1)
+				end
+				troopClick.Back:WaitForChild("TroopName").Text = fighter.DisplayName
+				troopClick.Back.Level.Text = "Level: "..tostring(fighter.Level)
+				troopClick.Back.Health.Text = "Health: "..tostring(fighter.Health)
+				if fighter.Type == "Farm" then
+					troopClick.Back.Damage.Text = "Cash per wave: "..tostring(fighter.Damage)
+					troopClick.Back.Range.Text = "Range: --"
+					troopClick.Back.AttackSpeed.Text = "Attack Speed: --"
+				else
+					troopClick.Back.Damage.Text = "Damage: "..tostring(fighter.Damage)
+					troopClick.Back.Range.Text = "Range: "..tostring(fighter.Range)
+					troopClick.Back.AttackSpeed.Text = tostring(fighter.AttackSpeed).." seconds per attack"
+				end
+				troopClick.Enabled = true
+				troopClick.Back.TroopImage.Image = rs.TroopDecals[fighter.DisplayName].Image
+				oldTroop = fighter.CodeName
+			end
+		elseif troop == "" then
+			oldTroop = ""
+			troopClick.Enabled = false
+		end
+		
+	elseif input.KeyCode == Enum.KeyCode.One then
+		if lastClickedKey == 1 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["1"].Image)
+			selectedTroop = slotFrame["1"].Troop.Value
+			lastClickedKey = 1
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	elseif input.KeyCode == Enum.KeyCode.Two then
+		if lastClickedKey == 2 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["2"].Image)
+			selectedTroop = slotFrame["2"].Troop.Value
+			lastClickedKey = 2
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	elseif input.KeyCode == Enum.KeyCode.Three then
+		if lastClickedKey == 3 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["3"].Image)
+			selectedTroop = slotFrame["3"].Troop.Value
+			lastClickedKey = 3
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	elseif input.KeyCode == Enum.KeyCode.Four then
+		if lastClickedKey == 4 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["4"].Image)
+			selectedTroop = slotFrame["4"].Troop.Value
+			lastClickedKey = 4
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	elseif input.KeyCode == Enum.KeyCode.Five then
+		if lastClickedKey == 5 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["5"].Image)
+			selectedTroop = slotFrame["5"].Troop.Value
+			lastClickedKey = 5
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	elseif input.KeyCode == Enum.KeyCode.Six then
+		if lastClickedKey == 6 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["6"].Image)
+			selectedTroop = slotFrame["6"].Troop.Value
+			lastClickedKey = 6
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	elseif input.KeyCode == Enum.KeyCode.Seven then
+		if lastClickedKey == 7 then
+			unselected()
+			lastClickedKey = nil
+			temp.Parent = nil
+			connection:Disconnect()
+		else
+			clearOldTemp()
+			selected(slotFrame["7"].Image)
+			selectedTroop = slotFrame["7"].Troop.Value
+			lastClickedKey = 7
+			temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+			temp.Name = player.Name
+			placeTemp()
+			connection = mouse.Move:Connect(placeTemp)
+		end
+	end
+end)
+
+for i,v in pairs(slotFrame:GetDescendants()) do
+	if v.Name == "Click" and v:IsA("ImageButton") then
+		v.MouseButton1Click:Connect(function()
+			if lastClickedKey == tonumber(v.Parent.Name) then
+				unselected()
+				lastClickedKey = nil
+				temp.Parent = nil
+				connection:Disconnect()
+			else
+				selected(v.Parent.Image)
+				clearOldTemp()
+				selectedTroop = v.Parent.Troop.Value
+				lastClickedKey = tonumber(v.Parent.Name)
+				temp = game.ReplicatedStorage.Temps[script.Parent.SlotFrame[lastClickedKey].Troop.Value]:Clone()
+				temp.Name = player.Name
+				placeTemp()
+				connection = mouse.Move:Connect(placeTemp)
+			end
+		end)
+	elseif v.Name == "Cost" then
+		v.Text = "$"..fighterDatabase[v.Parent.Troop.Value].Cost
+	end
+end
+
+local oldCash = cash.Value
+
+cash:GetPropertyChangedSignal("Value"):Connect(function()
+	--print(cash.Value-oldCash)
+	effects:GainedMoney(player, cash.Value-oldCash)
+	script.Parent.Cash.Text = "$"..tostring(cash.Value)
+	oldCash = cash.Value
+end)
+
+rs.GameFinished.OnClientEvent:Connect(function(won)
+	if won then
+		--print("won")
+		hud.Win.Visible = true
+		wait(5)
+		hud.Win.Visible = false
+	else
+		hud.Gameover.Visible = true
+		wait(5)
+		hud.Gameover.Visible = false
+	end
+end)
+
+troopClick.Back.Sell.MouseButton1Click:Connect(function()
+	rs.FighterInteract:FireServer("sell",oldTroop)
+	troopClick.Enabled = false
+end)
+
+-- Main Server Script
+
+wait(4)
+
+local rs = game:GetService("ReplicatedStorage")
+
+local maps = game.Workspace.Map
+
+local EnemyModule = require(game.ServerStorage.EnemyModule)
+
+local EnemiesFolder = game.ServerStorage.Enemies
+
+local WaveInfo = rs.WaveInfo
+
+local InbetweenWavetime = 2
+
+local currentWave = rs.Values.CurrentWave
+
+local gameOver = false
+
+local maxBaseHealth = rs.Values.MaxBaseHealth
+local baseHealth = rs.Values.BaseHealth
+
+local Waves = {
+	{
+		["Enemies"] = { -- 1
+			["Zombie"] = {
+				["Amount"] = 2;
+				["Delay"] = 2;
+				["Speed"] = 2;
+				["MaxHealth"] = 150;
+				["Damage"] = 25;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 2
+			["Zombie"] = {
+				["Amount"] = 3;
+				["Delay"] = 4;
+				["Speed"] = 2;
+				["MaxHealth"] = 150;
+				["Damage"] = 75;
+			};
+			["Vampire"] = {
+				["Amount"] = 1;
+				["Delay"] = 2;
+				["Speed"] = 3;
+				["MaxHealth"] = 350;
+				["Damage"] = 75;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 3
+			["Zombie"] = {
+				["Amount"] = 5;
+				["Delay"] = 1;
+				["Speed"] = 2;
+				["MaxHealth"] = 150;
+				["Damage"] = 25;
+			};
+			["Vampire"] = {
+				["Amount"] = 3;
+				["Delay"] = 1;
+				["Speed"] = 3;
+				["MaxHealth"] = 350;
+				["Damage"] = 75;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 4
+			["Zombie"] = {
+				["Amount"] = 8;
+				["Delay"] = 1;
+				["Speed"] = 2;
+				["MaxHealth"] = 300;
+				["Damage"] = 25;
+			};
+			["Vampire"] = {
+				["Amount"] = 5;
+				["Delay"] = 1;
+				["Speed"] = 2;
+				["MaxHealth"] = 450;
+				["Damage"] = 75;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 5
+			["Zombie"] = {
+				["Amount"] = 15;
+				["Delay"] = 1;
+				["Speed"] = 2;
+				["MaxHealth"] = 500;
+				["Damage"] = 25;
+			};
+			["Vampire"] = {
+				["Amount"] = 7;
+				["Delay"] = 2;
+				["Speed"] = 2;
+				["MaxHealth"] = 600;
+				["Damage"] = 100;
+			};
+			["FastZombie"] = {
+				["Amount"] = 1;
+				["Delay"] = 0;
+				["Speed"] = 3;
+				["MaxHealth"] = 1000;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 0.5;
+				["Speed"] = 4;
+				["MaxHealth"] = 500;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 5;
+				["MaxHealth"] = 600;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 6;
+				["MaxHealth"] = 700;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 7;
+				["MaxHealth"] = 800;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 8;
+				["MaxHealth"] = 900;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 9;
+				["MaxHealth"] = 1000;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 10;
+				["MaxHealth"] = 1100;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 11;
+				["MaxHealth"] = 1200;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 12;
+				["MaxHealth"] = 1300;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 13;
+				["MaxHealth"] = 1400;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 14;
+				["MaxHealth"] = 1500;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 15;
+				["MaxHealth"] = 1600;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 16;
+				["MaxHealth"] = 1700;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 17;
+				["MaxHealth"] = 1800;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 18;
+				["MaxHealth"] = 1900;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 19;
+				["MaxHealth"] = 2000;
+				["Damage"] = 250;
+			};
+		}
+	};
+	{
+		["Enemies"] = { -- 6
+			["FastZombie"] = {
+				["Amount"] = 10;
+				["Delay"] = 1;
+				["Speed"] = 20;
+				["MaxHealth"] = 2100;
+				["Damage"] = 250;
+			};
+		}
+	};
+}
+
+
+
+baseHealth:GetPropertyChangedSignal("Value"):Connect(function()
+	if rs.Values.BaseHealth.Value <= 0 then
+		print("GAMEOVER!")
+		gameOver = true
+	end
+end)
+
+maxBaseHealth.Value = 30000
+baseHealth.Value = 30000
+
+for i,Wave in pairs(Waves) do
+	if gameOver then break end
+	
+	local totalEnemies = 0
+	
+	print("Wave: "..i)
+	currentWave.Value = i
+	
+	--print(Waves)
+	--print(Wave)
+	for EnemyName,EnemyStats in pairs(Wave["Enemies"]) do
+		--print(i, EnemyStats)
+		totalEnemies += EnemyStats["Amount"]
+	end
+	
+	rs.Values.WaveTotalZombies.Value = totalEnemies
+	rs.Values.WaveZombiesLeftToSpawn.Value = totalEnemies
+	
+	for EnemyName,EnemyStats in pairs(Wave["Enemies"]) do
+		totalEnemies -= EnemyStats["Amount"]
+		for i = 1,EnemyStats["Amount"] do
+			wait(EnemyStats["Delay"])
+			rs.Values.WaveZombiesLeftToSpawn.Value -= 1
+			local NextEnemy = EnemyModule.spawn(EnemyName,EnemyStats)
+			--wait(EnemyStats["Delay"])
+		end
+	end
+	
+	repeat wait(2) --[[print("Wave not completed yet")--]] until #game.Workspace.SpawnedEnemies:GetChildren() == 0 or baseHealth.Value <= 0
+	if baseHealth.Value <= 0 then
+		print("u died")
+		rs.GameFinished:FireAllClients(false)
+	else
+		print("Wave Finished")
+		for _,v in pairs(game.Players:GetChildren()) do
+			v.Cash.Value += 100 * i
+		end
+		wait(InbetweenWavetime) -- Time to wait until next wave
+	end
+end
+
+print("Finished game")
+
+if baseHealth.Value > 0 then
+	print("You Win!")
+	rs.GameFinished:FireAllClients(true)
+end
+
+-- Enemy Module Script
+
+local rs = game:GetService("ReplicatedStorage")
+local pfs = game:GetService("PathfindingService")
+
+local Enemy = {}
+Enemy.__index = Enemy
+
+local map = game.Workspace.Map
+local tiles = map.Tiles
+
+local enemiesFolder = game.ServerStorage:WaitForChild("Enemies")
+local spawnedEnemies = game.Workspace:WaitForChild("SpawnedEnemies")
+
+function Enemy.spawn(enemyName,enemyTraits)
+	
+	local newEnemy = {}
+	setmetatable(newEnemy,Enemy)
+	
+	local enemyTemplate = enemiesFolder:FindFirstChild(enemyName)
+	newEnemy.Damage = enemyTraits["Damage"]
+	newEnemy.Lane = math.random(#game.Workspace.Map.Tiles:GetChildren())
+	--print(newEnemy.Lane)
+	newEnemy.Character = enemyTemplate:Clone()
+	newEnemy.Character.Lane.Value = newEnemy.Lane
+	newEnemy.Character.Name = newEnemy.Character.Name..tostring(math.random(1,999999))
+	newEnemy.Character.Humanoid.DisplayName = newEnemy.Character.Name
+	newEnemy.Character.HumanoidRootPart.CFrame = CFrame.new(map.Other[tostring(newEnemy.Lane)].Start.Position, map.Other[tostring(newEnemy.Lane)].End.Position)
+	newEnemy.Character.Humanoid.WalkSpeed = enemyTraits["Speed"]
+	newEnemy.Character.Humanoid.MaxHealth = enemyTraits["MaxHealth"]
+	newEnemy.Character.Humanoid.Health = enemyTraits["MaxHealth"]
+	newEnemy.Character.Parent = spawnedEnemies
+	
+	for i,v in pairs(newEnemy.Character:GetChildren()) do
+		if v:IsA("BasePart") then
+			v:SetNetworkOwner(nil)
+		end
+	end
+	
+	newEnemy.Character.Humanoid.Died:Connect(function()
+		newEnemy.Character:Destroy()
+	end)
+	
+	coroutine.resume(coroutine.create(function()
+		newEnemy:Move()
+	end))
+	
+	return newEnemy
+end
+
+function Enemy:Move()
+	coroutine.resume(coroutine.create(function()
+		local NPC = self.Character
+		
+		local path = pfs:CreatePath()
+		
+		if NPC:FindFirstChild("Humanoid") then
+			while NPC:FindFirstChild("HumanoidRootPart") and (NPC.HumanoidRootPart.Position - map.Other[tostring(self.Lane)].End.Position).Magnitude > 2.5 do
+				NPC.Humanoid:MoveTo(map.Other[tostring(self.Lane)].End.Position)
+				--print("moving again")
+				wait(2)
+			end
+			--NPC.Humanoid.MoveToFinished:Wait()
+		end
+		
+		if rs.Values.BaseHealth.Value > 0 and self.Character:FindFirstChild("Humanoid") then
+			rs.Values.BaseHealth.Value -=  self.Damage
+		end
+		
+		NPC:Destroy()
+	end))
+end
+
+return Enemy
+
+-- Fighter Module Script
+
+local rs = game:GetService("ReplicatedStorage")
+local fighterDatabase = require(rs.FighterDatabase)
+
+local FighterParam = RaycastParams.new()
+--FighterParam.CollisionGroup = ("Npcs")
+FighterParam.FilterDescendantsInstances = {game.Workspace.SpawnedEnemies}
+FighterParam.FilterType = Enum.RaycastFilterType.Whitelist
+FighterParam.IgnoreWater = true	
+
+local Fighter = {}
+Fighter.__index = Fighter
+
+local figherTemplates = rs.Fighters
+local spawnedFighters = game.Workspace.SpawnedFighters
+local spawnedEnemies = game.Workspace.SpawnedEnemies
+
+local idleAnimation = Instance.new("Animation")
+idleAnimation.AnimationId = "rbxassetid://180435571"
+
+-- string.gsub(newFighter.Name, "%d+", "")  <----- IMPORTANT, GETS RID OF NUMBERS AFTER THE STRING
+
+function Fighter.spawn(player,fighterName,tile)
+	
+	tile.Taken.Value = true
+	local newFighter = {}
+	setmetatable(newFighter,Fighter)
+	
+	-- fighterName = Polnareff123456789
+	-- baseFightername = Polnareff
+	
+	local fighterDisplayName = string.gsub(fighterName, "%d+", "")
+	
+	local templateClone = figherTemplates[fighterDisplayName]:Clone()
+	templateClone.Parent = spawnedFighters
+	
+	newFighter.Character = templateClone
+	newFighter.Character.Name = fighterName
+	
+	newFighter.DisplayName = fighterDisplayName
+	newFighter.CodeName = fighterName
+	--print(newFighter.DisplayName)
+	--print(newFighter.CodeName)
+	
+	newFighter.Owner = player.Name
+	newFighter.Level = fighterDatabase[fighterDisplayName].Level
+	newFighter.Type = fighterDatabase[fighterDisplayName].Type
+	newFighter.StarRating = fighterDatabase[fighterDisplayName].StarRating
+	newFighter.Cost = fighterDatabase[fighterDisplayName].Cost
+	newFighter.Health = fighterDatabase[fighterDisplayName].Health
+	newFighter.Range = fighterDatabase[fighterDisplayName].Range
+	newFighter.Damage = fighterDatabase[fighterDisplayName].Damage -- * newFighter.Level
+	newFighter.AttackSpeed = fighterDatabase[fighterDisplayName].AttackSpeed
+	newFighter.Lane = tonumber(tile.Parent.Name)
+	newFighter.Tile = tonumber(tile.Name)
+	
+	local Height = (0.5 * newFighter.Character.HumanoidRootPart.Size.Y) + newFighter.Character.Humanoid.HipHeight
+	newFighter.Character.HumanoidRootPart.CFrame = (tile.CFrame * CFrame.Angles(0,math.rad(-90),0)) + Vector3.new(0,Height + 1.75,0)
+	newFighter.Character.HumanoidRootPart.Anchored = true
+	
+	local idleTrack = newFighter.Character.Humanoid:LoadAnimation(idleAnimation)
+	idleTrack:Play()
+	
+	newFighter.Character.Humanoid.Died:Connect(function()
+		warn("fighter sold?")
+	end)
+	
+	return newFighter
+end
+
+function Fighter:Attack(dmg)
+	-- Code to show atk
+	
+	-- Damage enemy
+	if self.Type == "Attack" then
+		if true then
+			local ray = workspace:Raycast(self.Character.HumanoidRootPart.Position, self.Character.HumanoidRootPart.CFrame.LookVector * Vector3.new(1000,1000,1000),FighterParam)
+			if ray and ray.Instance and not ray.Instance.Parent:IsA("Accessory") then -- and ray.Instance.CollisionGroupId == 1 then
+				local enemy = ray.Instance.Parent
+				if enemy ~= nil then
+					if enemy:FindFirstChild("Humanoid") and (self.Character.HumanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude <= 3.5 + self.Range then -- have to check twice cuz of wait above
+						--print(self.Character.Name.." hit "..enemy.Name.."!")
+						--print("Range: "..tostring(self.Range))
+						--print("Magnitude: "..tostring((self.Character.HumanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude))
+						--print("Damage: "..tostring(self.Damage))
+						--print("-------------------------------------------------")
+						local atkTrack = self.Character.Humanoid:LoadAnimation(self.Character.Anims.Attack)
+						atkTrack:Play()
+						wait(self.Character.Anims.AttackTime.Value)
+						if enemy:FindFirstChild("Humanoid") then
+							enemy.Humanoid:TakeDamage(dmg)
+						end
+					end
+				end
+			end
+		elseif self.Type == "Farm" then
+			if game.Players:FindFirstChild(self.Owner) then
+				local player = game.Players:FindFirstChild(self.Owner)
+
+				local atkTrack = self.Character.Humanoid:LoadAnimation(self.Character.Anims.Attack)
+				atkTrack:Play()
+				player.Cash.Value += self.Damage
+			else
+				warn("player left?")
+			end
+		else
+			--print("sold?")
+		end
+	end
+end
+
+--[[
+function Fighter:GetClosestEnemy()
+	
+	local shortestMag = nil
+	local shortestNPC = nil
+	
+	for i,enemy in pairs(spawnedEnemies:GetChildren()) do
+		if self.Lane == enemy.Lane.Value then
+			print("someone's in my lane!")
+			print(enemy)
+			local mag = (enemy.HumanoidRootPart.Position - self.Character.HumanoidRootPart.Position).Magnitude
+			
+			if shortestMag == nil then
+				shortestMag = mag
+				shortestNPC = enemy
+			elseif mag < shortestMag then
+				shortestMag = mag
+				shortestNPC = enemy
+			end
+		end
+	end
+	
+	if shortestNPC ~= nil then
+		print("The closest enemy to "..self.Character.Name.." is "..shortestNPC.Name)
+		return shortestNPC
+	else
+		print("No NPC's found")
+		return nil
+	end
+end
+--]]
+
+--[[
+OLD
+
+function Fighter.spawn(fighterName,spawnCFrame)
+	
+	local newFighter = {}
+	setmetatable(newFighter,Fighter)
+	newFighter.Level = 1
+	newFighter.DamagePerShot = 30 * newFighter.Level
+	
+	local templateClone = figherTemplates[fighterName]:Clone()
+	templateClone.Parent = spawnedFighters
+	
+	newFighter.Character = templateClone
+	newFighter.Character.HumanoidRootPart.CFrame = spawnCFrame + Vector3.new(0,1.5,0)
+	
+	-- Load animation of weapon into NPC
+	
+	local animation = Instance.new("Animation")
+	animation.AnimationId = "rbxassetid://00000"
+	
+	local anim = newFighter.Character.Humanoid:LoadAnimation(animation)
+	anim:Play()
+	
+	return newFighter
+end
+
+function Fighter:Attack(enemy,dmg)
+	-- Code to show gun fire
+	
+	-- Damage enemy
+	if enemy ~= nil then
+		enemy.Humanoid:TakeDamage(dmg)
+	end
+end
+
+function Fighter:GetClosestEnemy()
+	
+	local shortestMag = nil
+	local shortestNPC = nil
+	
+	for i,enemy in pairs(spawnedEnemies:GetChildren()) do
+		local mag = (enemy.HumanoidRootPart.Position - self.Character.HumanoidRootPart.Position).Magnitude
+		
+		if shortestMag == nil then
+			shortestMag = mag
+			shortestNPC = enemy
+		elseif mag < shortestMag then
+			shortestMag = mag
+			shortestNPC = enemy
+		end
+	end
+	
+	if shortestNPC ~= nil then
+		print("The closest enemy to "..self.Character.Name.." is "..shortestNPC.Name)
+		return shortestNPC
+	else
+		print("No NPC's found")
+		return nil
+	end
+end
+
+function Fighter:GetClosestEnemy()
+	
+end
+--]]
+
+return Fighter
+
+-- Fighter Script
+
+local rs = game:GetService("ReplicatedStorage")
+
+local FighterModule = require(game.ServerStorage.FighterModule)
+local FighterManager = require(game.ReplicatedStorage.FighterManager)
+
+local effects = require(rs.Effects)
+local counter = 0
+
+rs.PlaceFighter.OnServerEvent:Connect(function(player, slot, tile)
+	--print(tile:GetFullName())
+	if tile.Taken.Value == true then
+		print("There is already a fighter there")
+	else
+		local fighterName = player.PlayerGui.Troop.Frame.SlotFrame[slot].Troop.Value..tostring(counter)
+		counter += 1
+		local fighter = FighterModule.spawn(player,fighterName,tile)
+		FighterManager.AddFighter(player,fighter)
+		print(FighterManager.GetAllFighters(player))
+		if player.Cash.Value >= fighter.Cost then
+			coroutine.resume(coroutine.create(function()
+				if fighter.Type == "Attack" then
+					while fighter.Character and wait(fighter.AttackSpeed) do
+						if fighter.Character:FindFirstChild("HumanoidRootPart") then
+							fighter:Attack(fighter.Damage)
+						else
+							print("sold?")
+							break
+						end
+					end
+				elseif fighter.Type == "Farm" then
+					--while fighter.Character and wait(fighter.AttackSpeed) do
+					--	fighter:Attack(fighter.Damage)
+					--end
+					--CASH PER WAVE
+					rs.Values.CurrentWave:GetPropertyChangedSignal("Value"):Connect(function()
+						if fighter.Character then
+							player.Cash.Value += fighter.Damage
+							print("Gave "..tostring(fighter.Damage))
+						end
+					end)
+				end
+			end))
+		else
+			print("not enough cash!")
+		end
+	end
+end)
+
+rs.FighterInteract.OnServerEvent:Connect(function(player,action,fighterName)
+	print(FighterManager)
+end)
+
+rs.GetData.OnServerInvoke = (function(player,fighterName)
+	return FighterManager.GetFighter(player,fighterName)
+end)
+
+
